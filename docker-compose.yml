@@ -2,6 +2,7 @@ version: '3'
 
 services:
   vnstat-ui:
+    container_name: vnstat-ui
     build: .
     image: vnstat-ui
     restart: always
