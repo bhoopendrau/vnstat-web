@@ -28,22 +28,17 @@ software.
 
 ## Usage
 
-vnstat version 2.x must be configured first. To set up the web interface,
-simply place the following files in a directory served by your HTTP server:
+Recommeded method (docker compose)
 
-* `index.html`
-* `style.css`
-* `main.js`
-* `Chart.min.js`
-* `data.php`
+`version: '3'
 
-> **Note:** `data.php` must be run by a PHP interpreter. Simply serving the
-> static content will not work.
-
-The `data.php` script will automatically get data from vnstat's JSON output.
-Make sure the `vnstat` executable is in the `PATH` of the PHP interpreter. If
-you installed vnstat using a package manager, this should be done
-automatically.
+services:
+  vnstat-ui:
+    container_name: vnstat-ui
+    build: .
+    image: bhoopendrau004/vnstat-ui:latest
+    restart: always
+    network_mode: host`
 
 ## Configuration & customization
 

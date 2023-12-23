@@ -4,6 +4,6 @@ services:
   vnstat-ui:
     container_name: vnstat-ui
     build: .
-    image: vnstat-ui
+    image: bhoopendrau004/vnstat-ui:latest
     restart: always
     network_mode: 'host'
