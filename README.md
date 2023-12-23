@@ -30,7 +30,8 @@ software.
 
 Recommeded method (docker compose)
 
-`version: '3'
+```
+version: '3'
 
 services:
   vnstat-ui:
@@ -38,7 +39,8 @@ services:
     build: .
     image: bhoopendrau004/vnstat-ui:latest
     restart: always
-    network_mode: host`
+    network_mode: host
+```
 
 ## Configuration & customization
 
