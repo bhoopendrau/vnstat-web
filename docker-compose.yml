@@ -6,5 +6,4 @@ services:
       - ./data:/var/lib/vnstat:Z
     image: bhoopendrau004/vnstat-ui:latest
     restart: always
-    ports:
-      - "8090:8000"
+    network_mode: 'host'
