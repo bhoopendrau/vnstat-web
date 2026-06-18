@@ -7,6 +7,6 @@ RUN mv /var/www/html/init.sh /init.sh
 RUN chmod +x /init.sh
 RUN apt-get update && apt-get install vnstat -y
 RUN echo 'ServerName 0.0.0.0' >> /etc/apache2/apache2.conf
-EXPOSE 7979
+EXPOSE 8000
 CMD ["./init.sh"]
 
