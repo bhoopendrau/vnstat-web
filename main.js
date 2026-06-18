@@ -1,263 +1,412 @@
-/*
- * Round to given number of decimal places
- *
- * number: number to round
- * precision: number of decimals places
- */
-Math.roundTo = function(number, precision) {
-	return Math.round(number * (10 ** precision)) / (10 ** precision);
-}
+(function () {
+	'use strict';
 
-Date.prototype.getDayOfWeekName = function() {
-	return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][this.getDay()];
-};
+	let chartInstance = null;
+	let currentData = null;
 
-Date.prototype.toSpecialFormattedString = function(type) {
-		switch (type) {
+	// --- Utilities ---
+
+	function roundTo(number, precision) {
+		const factor = 10 ** precision;
+		return Math.round(number * factor) / factor;
+	}
+
+	function formatBytes(bytes) {
+		if (bytes === 0) return '0 B';
+		const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+		const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+		const value = bytes / (1024 ** i);
+		return roundTo(value, i < 2 ? 0 : 2) + ' ' + units[i];
+	}
+
+	function formatBytesGiB(bytes) {
+		return roundTo(bytes / (1024 ** 3), 3);
+	}
+
+	const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+	function formatDate(timestamp, timeScale) {
+		const d = new Date(timestamp * 1000);
+		const pad = (n) => n.toString().padStart(2, '0');
+		switch (timeScale) {
 			case 'hour':
-				return `${this.getFullYear()}-${(this.getMonth()+1).toString().padStart(2, '0')}-${this.getDate().toString().padStart(2, '0')} ${this.getHours().toString().padStart(2, '0')}:00`;
+				return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`;
 			case 'day':
 			case 'top':
-				return `${this.getDayOfWeekName().substring(0, 3)}, ${this.getFullYear()}-${(this.getMonth()+1).toString().padStart(2, '0')}-${this.getDate().toString().padStart(2, '0')}`;
+				return `${DAY_NAMES[d.getDay()]}, ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 			case 'month':
-				return `${this.getFullYear()}-${(this.getMonth()+1).toString().padStart(2, '0')}`;
+				return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 			case 'year':
-				return `${this.getFullYear()}`;
+				return `${d.getFullYear()}`;
+			default:
+				return d.toLocaleDateString();
 		}
-}
-
-/*
- * Update colors of graphs' text and grid
- */
-function updateGraphColors() {
-	fgcolor = window.getComputedStyle(document.documentElement).getPropertyValue('--fg-color').trim()
-	bgcolor = window.getComputedStyle(document.documentElement).getPropertyValue('--bg-color').trim()
-	Chart.defaults.global.defaultFontColor = fgcolor;
-	for (const i in Chart.instances) {
-		const c = Chart.instances[i];
-		c.options.scales.yAxes[0].gridLines.color = fgcolor;
-		c.options.scales.xAxes[0].gridLines.color = fgcolor;
-		c.update();
 	}
-}
 
-function createGraphContent(ifdata) {
-	const options = {
-		title: {
-			display: true,
-			text: ifname,
-		},
-		tooltips: {
-			callbacks: {
-				label: (tti, data) => {
-					return data.datasets[tti.datasetIndex].label + ": " + data.datasets[tti.datasetIndex].data[tti.index] + ' GiB';
-				}
-			}
-		},
-		scales: {
-			xAxes: [{
-				stacked: stackGraphs,
-			}],
-			yAxes: [{
-				stacked: stackGraphs,
-				ticks: {
-					beginAtZero: true,
-				},
-			}],
-		},
-	};
-	const data = {
-		labels: [],
-		datasets: [
-			{
-				label: 'Rx',
-				data: [],
-				backgroundColor: '#5DADE2',
-				borderColor: '#3498DB',
-			},
-			{
-				label: 'Tx',
-				data: [],
-				backgroundColor: '#F7DC6F',
-				borderColor: '#F4D03F',
-			},
-		],
-	};
-	if (!stackGraphs) {
-		data.datasets.push({
-			label: 'Total',
-			data: [],
-			backgroundColor: '#58D68D',
-			borderColor: '#2ECC71',
+	// --- Theme Management ---
+
+	function getEffectiveTheme() {
+		const stored = localStorage.getItem('theme');
+		if (stored) return stored;
+		return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+	}
+
+	function applyTheme(theme) {
+		document.documentElement.setAttribute('data-theme', theme);
+		const icon = document.getElementById('theme-icon');
+		if (icon) icon.textContent = theme === 'dark' ? '☀' : '☾';
+		updateChartColors();
+	}
+
+	function toggleTheme() {
+		const current = getEffectiveTheme();
+		const next = current === 'dark' ? 'light' : 'dark';
+		localStorage.setItem('theme', next);
+		applyTheme(next);
+	}
+
+	function getThemeColors() {
+		const style = getComputedStyle(document.documentElement);
+		return {
+			fg: style.getPropertyValue('--fg-primary').trim(),
+			secondary: style.getPropertyValue('--fg-secondary').trim(),
+			border: style.getPropertyValue('--border-color').trim(),
+		};
+	}
+
+	function updateChartColors() {
+		if (!chartInstance) return;
+		const colors = getThemeColors();
+		Chart.defaults.color = colors.fg;
+		chartInstance.options.scales.x.grid.color = colors.border;
+		chartInstance.options.scales.y.grid.color = colors.border;
+		chartInstance.options.scales.x.ticks.color = colors.fg;
+		chartInstance.options.scales.y.ticks.color = colors.fg;
+		if (chartInstance.options.plugins.title) {
+			chartInstance.options.plugins.title.color = colors.fg;
+		}
+		chartInstance.update();
+	}
+
+	// --- Stats ---
+
+	function computeStats(data) {
+		const totalRx = data.reduce((sum, e) => sum + e.rx, 0);
+		const totalTx = data.reduce((sum, e) => sum + e.tx, 0);
+		const peak = data.length > 0 ? Math.max(...data.map(e => e.rx + e.tx)) : 0;
+		return { totalRx, totalTx, peak, total: totalRx + totalTx };
+	}
+
+	function renderStats(stats) {
+		document.getElementById('stat-rx').textContent = formatBytes(stats.totalRx);
+		document.getElementById('stat-tx').textContent = formatBytes(stats.totalTx);
+		document.getElementById('stat-peak').textContent = formatBytes(stats.peak);
+		document.getElementById('stat-total').textContent = formatBytes(stats.total);
+	}
+
+	function resetStats() {
+		['stat-rx', 'stat-tx', 'stat-peak', 'stat-total'].forEach(id => {
+			document.getElementById(id).textContent = '—';
 		});
 	}
 
-	for (const entry of ifdata) {
-		const date = new Date(entry.time * 1000);
-		data.labels.push(date.toSpecialFormattedString(timeScale));
-		data.datasets[0].data.push(Math.roundTo(entry.rx / (1024 ** 3), 3));
-		data.datasets[1].data.push(Math.roundTo(entry.tx / (1024 ** 3), 3));
-		if (!stackGraphs)
-			data.datasets[2].data.push(Math.roundTo((entry.rx + entry.tx) / (1024 ** 3), 3));
+	// --- Loading ---
+
+	function showLoading() {
+		document.getElementById('loading-overlay').classList.add('active');
 	}
 
-	Chart.Bar('graph-canvas', { data: data, options: options });
-};
-
-/*
- * Process data received from the data.php backend
- */
-function processData(data) {
-	createGraphContent(data);
-}
-
-/*
- * Process list of interfaces received from vnstat
- */
-function processInterfaceList(data) {
-	/* if no interfaces available, add an error message to the page and return */
-	if (data.length <= 0) {
-		document.body.insertAdjacentHTML('beforeend',
-			'<h3 id="error-msg">No interfaces available</h3>');
-		for (element of document.getElementsByClassName('canvas-container'))
-			element.style.display = 'none';
-		return;
+	function hideLoading() {
+		document.getElementById('loading-overlay').classList.remove('active');
 	}
 
-	/* add each interface to the form options */
-	for (const ifname of data) {
-		document.getElementById('ifname-select').insertAdjacentHTML('beforeend',
-			`<option id="if-${ifname}" value="${ifname}">${ifname}</option>`
-		);
-	}
+	// --- Chart ---
 
-	/* if user has specified an interface, select that one in the form */
-	if (usp.get('ifname')) {
-		ifname = usp.get('ifname');
-		if (data.indexOf(ifname) === -1) {
-			document.body.insertAdjacentHTML('beforeend',
-				'<h3 id="error-msg">Selected interface not available</h3>');
-			for (element of document.getElementsByClassName('canvas-container'))
-				element.style.display = 'none';
-			return;
+	function createChart(ifdata, ifname, timeScale, stackGraphs) {
+		const canvas = document.getElementById('graph-canvas');
+		if (chartInstance) {
+			chartInstance.destroy();
+			chartInstance = null;
 		}
+
+		const colors = getThemeColors();
+		const labels = ifdata.map(e => formatDate(e.time, timeScale));
+		const datasets = [
+			{
+				label: 'Rx',
+				data: ifdata.map(e => formatBytesGiB(e.rx)),
+				backgroundColor: 'rgba(59, 130, 246, 0.7)',
+				borderColor: '#3b82f6',
+				borderWidth: 2,
+				borderRadius: 4,
+			},
+			{
+				label: 'Tx',
+				data: ifdata.map(e => formatBytesGiB(e.tx)),
+				backgroundColor: 'rgba(245, 158, 11, 0.7)',
+				borderColor: '#f59e0b',
+				borderWidth: 2,
+				borderRadius: 4,
+			},
+		];
+
+		if (!stackGraphs) {
+			datasets.push({
+				label: 'Total',
+				data: ifdata.map(e => formatBytesGiB(e.rx + e.tx)),
+				backgroundColor: 'rgba(16, 185, 129, 0.7)',
+				borderColor: '#10b981',
+				borderWidth: 2,
+				borderRadius: 4,
+			});
+		}
+
+		chartInstance = new Chart(canvas, {
+			type: 'bar',
+			data: { labels, datasets },
+			options: {
+				responsive: true,
+				maintainAspectRatio: true,
+				interaction: {
+					intersect: false,
+					mode: 'index',
+				},
+				plugins: {
+					title: {
+						display: true,
+						text: ifname,
+						color: colors.fg,
+						font: { size: 16, weight: '600', family: "'Inter', sans-serif" },
+						padding: { bottom: 16 },
+					},
+					tooltip: {
+						backgroundColor: 'rgba(15, 23, 42, 0.9)',
+						titleFont: { family: "'Inter', sans-serif" },
+						bodyFont: { family: "'Inter', sans-serif" },
+						padding: 12,
+						cornerRadius: 8,
+						callbacks: {
+							label: function (context) {
+								return context.dataset.label + ': ' + context.parsed.y + ' GiB';
+							},
+						},
+					},
+					legend: {
+						labels: {
+							color: colors.fg,
+							font: { family: "'Inter', sans-serif", weight: '500' },
+							usePointStyle: true,
+							pointStyle: 'rectRounded',
+							padding: 16,
+						},
+					},
+				},
+				scales: {
+					x: {
+						stacked: stackGraphs,
+						grid: { color: colors.border, drawBorder: false },
+						ticks: {
+							color: colors.fg,
+							font: { family: "'Inter', sans-serif", size: 11 },
+							maxRotation: 45,
+						},
+					},
+					y: {
+						stacked: stackGraphs,
+						beginAtZero: true,
+						grid: { color: colors.border, drawBorder: false },
+						ticks: {
+							color: colors.fg,
+							font: { family: "'Inter', sans-serif", size: 11 },
+							callback: function (value) {
+								return value + ' GiB';
+							},
+						},
+					},
+				},
+			},
+		});
+	}
+
+	// --- Error Display ---
+
+	function showError(message) {
+		const chartCard = document.getElementById('chart-card');
+		const canvas = document.getElementById('graph-canvas');
+		canvas.style.display = 'none';
+
+		let errorEl = chartCard.querySelector('.error-msg');
+		if (!errorEl) {
+			errorEl = document.createElement('p');
+			errorEl.className = 'error-msg';
+			chartCard.appendChild(errorEl);
+		}
+		errorEl.textContent = message;
+	}
+
+	function clearError() {
+		const chartCard = document.getElementById('chart-card');
+		const canvas = document.getElementById('graph-canvas');
+		canvas.style.display = '';
+
+		const errorEl = chartCard.querySelector('.error-msg');
+		if (errorEl) errorEl.remove();
+	}
+
+	// --- URL Params ---
+
+	function readParams() {
+		const usp = new URLSearchParams(window.location.search);
+		return {
+			ifname: usp.get('ifname') || null,
+			timeScale: usp.get('ts') || 'day',
+			timeSlots: parseInt(usp.get('nr'), 10) || 8,
+			stack: usp.has('stack'),
+		};
+	}
+
+	function getControlValues() {
+		return {
+			ifname: document.getElementById('ifname-select').value,
+			timeScale: document.getElementById('ts-select').value,
+			timeSlots: parseInt(document.getElementById('nr-box').value, 10) || 8,
+			stack: document.getElementById('stack-checkbox').checked,
+		};
+	}
+
+	function syncURL(params) {
+		const url = new URL(window.location);
+		url.searchParams.set('ifname', params.ifname);
+		url.searchParams.set('ts', params.timeScale);
+		url.searchParams.set('nr', params.timeSlots);
+		if (params.stack) {
+			url.searchParams.set('stack', '');
+		} else {
+			url.searchParams.delete('stack');
+		}
+		history.replaceState(null, '', url);
+	}
+
+	function applyParamsToControls(params) {
+		document.getElementById('ts-select').value = params.timeScale;
+		document.getElementById('nr-box').value = params.timeSlots;
+		document.getElementById('stack-checkbox').checked = params.stack;
+	}
+
+	// --- Data Fetching ---
+
+	function fetchAndRender() {
+		const params = getControlValues();
+		syncURL(params);
+		showLoading();
+		clearError();
+
+		fetch(`data.php?requesttype=data&ifname=${encodeURIComponent(params.ifname)}&timescale=${encodeURIComponent(params.timeScale)}&period=${params.timeSlots}`, {
+			credentials: 'same-origin',
+		})
+			.then(response => {
+				if (!response.ok) throw new Error('Failed to fetch data');
+				return response.json();
+			})
+			.then(data => {
+				currentData = data;
+				renderStats(computeStats(data));
+				createChart(data, params.ifname, params.timeScale, params.stack);
+			})
+			.catch(() => {
+				resetStats();
+				showError('Failed to load bandwidth data.');
+			})
+			.finally(() => {
+				hideLoading();
+			});
+	}
+
+	function fetchInterfaces() {
+		showLoading();
+
+		fetch('data.php?requesttype=iflist', { credentials: 'same-origin' })
+			.then(response => {
+				if (!response.ok) throw new Error('Failed to fetch interfaces');
+				return response.json();
+			})
+			.then(data => {
+				if (!data || data.length === 0) {
+					hideLoading();
+					showError('No interfaces available.');
+					document.getElementById('stats-cards').style.display = 'none';
+					return;
+				}
+
+				const select = document.getElementById('ifname-select');
+				data.forEach(name => {
+					const option = document.createElement('option');
+					option.value = name;
+					option.textContent = name;
+					select.appendChild(option);
+				});
+
+				const params = readParams();
+				if (params.ifname && data.includes(params.ifname)) {
+					select.value = params.ifname;
+				} else {
+					select.value = data[0];
+				}
+
+				applyParamsToControls(params);
+				fetchAndRender();
+			})
+			.catch(() => {
+				hideLoading();
+				showError('Failed to connect to vnstat backend.');
+			});
+	}
+
+	// --- Controls ---
+
+	function initControls() {
+		const controls = ['ifname-select', 'ts-select', 'nr-box', 'stack-checkbox'];
+		controls.forEach(id => {
+			document.getElementById(id).addEventListener('change', fetchAndRender);
+		});
+	}
+
+	// --- Init ---
+
+	function init() {
+		applyTheme(getEffectiveTheme());
+
+		document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
+		window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+			if (!localStorage.getItem('theme')) {
+				applyTheme(getEffectiveTheme());
+			}
+		});
+
+		Chart.defaults.elements.bar.borderWidth = 2;
+		Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
+		initControls();
+		fetchInterfaces();
+
+		window.addEventListener('beforeprint', () => {
+			if (!chartInstance) return;
+			chartInstance.options.scales.x.grid.color = '#ccc';
+			chartInstance.options.scales.y.grid.color = '#ccc';
+			chartInstance.options.scales.x.ticks.color = 'black';
+			chartInstance.options.scales.y.ticks.color = 'black';
+			Chart.defaults.color = 'black';
+			chartInstance.update();
+			chartInstance.resize();
+		});
+
+		window.addEventListener('afterprint', updateChartColors);
+	}
+
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', init);
 	} else {
-		/* if no interface specified, choose the first one */
-		ifname = data[0];
+		init();
 	}
-	for (const option of document.getElementById('ifname-select').children)
-		option.selected = false;
-	document.getElementById(`if-${ifname}`).selected = true;
-
-	/* Fetch JSON data from vnstat and create graphs */
-	fetch(`data.php?requesttype=data&ifname=${ifname}&timescale=${timeScale}&period=${timeSlots}`, {
-		credentials: 'same-origin',
-	})
-		.then(response => response.json())
-		.then(data => processData(data));
-}
-
-/* Get '--fg-color' and '--bg-color' custom CSS properties */
-const rootElement = document.querySelector(':root');
-let fgcolor = getComputedStyle(rootElement).getPropertyValue('--fg-color').trim()
-let bgcolor = getComputedStyle(rootElement).getPropertyValue('--bg-color').trim()
-
-/* Chart.js global configuration options */
-Chart.defaults.global.elements.rectangle.borderWidth = 2;
-Chart.platform.disableCSSInjection = true;
-Chart.defaults.global.defaultFontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif";
-Chart.defaults.global.defaultFontColor = fgcolor;
-Chart.defaults.scale.gridLines.color = fgcolor;
-
-const usp = new URLSearchParams(window.location.search);
-
-let ifname;
-
-/* Set 'timeSlots' based on URL query parameter 'nr' */
-let timeSlots;
-if (usp.get('nr'))
-	timeSlots = usp.get('nr');
-else
-	timeSlots = 8;
-
-/* Set 'timeScale' based on URL query parameter 'ts' */
-let timeScale;
-switch (usp.get('ts')) {
-	case 'hour':
-		timeScale = 'hour';
-		document.getElementById('ts-d').selected = false;
-		document.getElementById('ts-h').selected = true;
-		document.getElementById('ts-m').selected = false;
-		document.getElementById('ts-t').selected = false;
-		document.getElementById('ts-y').selected = false;
-		break;
-	case 'month':
-		timeScale = 'month';
-		document.getElementById('ts-d').selected = false;
-		document.getElementById('ts-h').selected = false;
-		document.getElementById('ts-m').selected = true;
-		document.getElementById('ts-t').selected = false;
-		document.getElementById('ts-y').selected = false;
-		break;
-	case 'year':
-		timeScale = 'year';
-		document.getElementById('ts-d').selected = false;
-		document.getElementById('ts-h').selected = false;
-		document.getElementById('ts-m').selected = false;
-		document.getElementById('ts-t').selected = false;
-		document.getElementById('ts-y').selected = true;
-		break;
-	case 'top':
-		timeScale = 'top';
-		document.getElementById('ts-d').selected = false;
-		document.getElementById('ts-h').selected = false;
-		document.getElementById('ts-m').selected = false;
-		document.getElementById('ts-t').selected = true;
-		document.getElementById('ts-y').selected = false;
-		break;
-	case 'day':
-	default:
-		timeScale = 'day';
-		document.getElementById('ts-d').selected = true;
-		document.getElementById('ts-h').selected = false;
-		document.getElementById('ts-m').selected = false;
-		document.getElementById('ts-t').selected = false;
-		document.getElementById('ts-y').selected = false;
-		break;
-}
-
-/* Set time slot input */
-document.getElementById('nr-box').value = timeSlots;
-
-/* Get stacking configuration based on URL query parameter 's' */
-let stackGraphs = false;
-if (usp.get('stack') || usp.has('stack')) {
-	stackGraphs = true;
-	document.getElementById('stack-checkbox').checked = true;
-}
-
-/* Update graphs when color scheme changes */
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateGraphColors);
-
-/* Fetch list of available interfaces */
-fetch('data.php?requesttype=iflist', {
-	credentials: 'same-origin',
-})
-	.then(response => response.json())
-	.then(data => processInterfaceList(data));
-
-/* Update graph colors when all content has loaded */
-window.addEventListener('load', updateGraphColors);
-
-/* Style charts before and after printing page */
-window.addEventListener('beforeprint', () => {
-	Chart.defaults.global.defaultFontColor = 'black';
-	for (const i in Chart.instances) {
-		const c = Chart.instances[i];
-		c.options.scales.yAxes[0].gridLines.color = 'black';
-		c.options.scales.xAxes[0].gridLines.color = 'black';
-		c.update();
-		c.resize()
-	}
-});
-window.addEventListener('afterprint', updateGraphColors);
+})();
