@@ -384,7 +384,6 @@
 			}
 		});
 
-		Chart.defaults.elements.bar.borderWidth = 2;
 		Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
 		initControls();
