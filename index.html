@@ -1,56 +1,90 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 	<head>
 		<meta charset="utf-8">
-
-		<title>Bandwidth usage report</title>
-
-		<meta name="author" content="Kian Kasad">
-
+		<title>Vnstat - Network Bandwidth Monitor</title>
 		<meta name="viewport" content="width=device-width, initial-scale=1">
-
-		<script src="Chart.min.js" integrity="sha256-t9UJPrESBeG2ojKTIcFLPGF7nHi2vEc7f5A2KpH/UBU="></script>
+		<link rel="preconnect" href="https://fonts.googleapis.com">
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+		<link rel="stylesheet" href="style.css">
+		<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 		<script defer src="main.js"></script>
-
-		<link rel="stylesheet" href="style.css" />
 	</head>
 
 	<body>
-		<header>
-			<h2>Bandwidth usage report</h2>
-			<form method=GET onchange="this.submit();">
-				<div>
-					<label for="ifname-select">Interface:</label>
-					<select name=ifname id="ifname-select">
-					</select>
+		<div class="dashboard">
+			<header class="dashboard-header">
+				<div class="header-title">
+					<h1>vnstat</h1>
+					<span class="header-subtitle">Network Bandwidth Monitor</span>
 				</div>
-				<div>
-					<label for=stack-checkbox>Stack graphs</label>
-					<input type=checkbox name=stack id=stack-checkbox />
-				</div>
-				<div>
-					<label for=ts-select>Time scale:</label>
-					<select name=ts id="ts-select">
-						<option value=hour id=ts-h>Hourly</option>
-						<option value=day id=ts-d>Daily</option>
-						<option value=month id=ts-m>Monthly</option>
-						<option value=year id=ts-y>Yearly</option>
-						<option value=top id=ts-t>Top (daily)</option>
-					</select>
-				</div>
-				<div>
-					<label for=nr-box>Time slots:</label>
-					<input type=number name=nr id=nr-box min=1 max=50 />
-				</div>
-			</form>
-		</header>
+				<button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle theme">
+					<span class="theme-icon" id="theme-icon">&#9790;</span>
+				</button>
+			</header>
 
-		<noscript>
-			<p>JavaScript is required to render the graphs</p>
-		</noscript>
-		<div class="canvas-container">
-			<canvas id="graph-canvas">Your browser does not support canvas elements.</canvas>
+			<section class="controls-bar">
+				<div class="control-group">
+					<label for="ifname-select">Interface</label>
+					<select name="ifname" id="ifname-select"></select>
+				</div>
+				<div class="control-group">
+					<label for="ts-select">Time Scale</label>
+					<select name="ts" id="ts-select">
+						<option value="hour">Hourly</option>
+						<option value="day" selected>Daily</option>
+						<option value="month">Monthly</option>
+						<option value="year">Yearly</option>
+						<option value="top">Top (daily)</option>
+					</select>
+				</div>
+				<div class="control-group">
+					<label for="nr-box">Time Slots</label>
+					<input type="number" name="nr" id="nr-box" min="1" max="50" value="8">
+				</div>
+				<div class="control-group">
+					<label for="stack-checkbox">Stack Graphs</label>
+					<label class="toggle-switch">
+						<input type="checkbox" name="stack" id="stack-checkbox">
+						<span class="toggle-slider"></span>
+					</label>
+				</div>
+			</section>
+
+			<section class="stats-cards" id="stats-cards">
+				<div class="stat-card stat-rx">
+					<span class="stat-label">Total Received</span>
+					<span class="stat-value" id="stat-rx">&mdash;</span>
+				</div>
+				<div class="stat-card stat-tx">
+					<span class="stat-label">Total Transmitted</span>
+					<span class="stat-value" id="stat-tx">&mdash;</span>
+				</div>
+				<div class="stat-card stat-peak">
+					<span class="stat-label">Peak Usage</span>
+					<span class="stat-value" id="stat-peak">&mdash;</span>
+				</div>
+				<div class="stat-card stat-total">
+					<span class="stat-label">Total Traffic</span>
+					<span class="stat-value" id="stat-total">&mdash;</span>
+				</div>
+			</section>
+
+			<section class="chart-section">
+				<div class="chart-card" id="chart-card">
+					<div class="loading-overlay" id="loading-overlay">
+						<div class="loading-spinner"></div>
+					</div>
+					<canvas id="graph-canvas"></canvas>
+				</div>
+			</section>
+
+			<noscript>
+				<div class="noscript-message">
+					<p>JavaScript is required to render the graphs.</p>
+				</div>
+			</noscript>
 		</div>
-
 	</body>
 </html>

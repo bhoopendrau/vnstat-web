@@ -3,7 +3,10 @@ services:
     container_name: vnstat-ui
     build: .
     volumes:
-      - ./data:/var/lib/vnstat:Z
+      - vnstat-data:/var/lib/vnstat
     image: bhoopendrau004/vnstat-ui:latest
     restart: always
     network_mode: 'host'
+
+volumes:
+  vnstat-data:
